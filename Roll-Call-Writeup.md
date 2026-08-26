@@ -1,246 +1,264 @@
-# تقرير حل تحدي Roll Call
+# Roll Call - Crypto Writeup
 
-## معلومات التحدي
+## Challenge Information
 
-- **اسم التحدي:** Roll Call
-- **التصنيف:** Crypto
-- **المنصة:** Flagyard CTF
-- **الخدمة:** `tcp.flagyard.com:15537`
-
----
-
-# وصف التحدي
-
-يقدم لنا التحدي نظام حضور (Roll Call)، حيث يحتوي النظام على قائمة من 256 عضوًا.
-
-في كل جولة يقوم السيرفر باختيار عضو واحد بشكل عشوائي وحذفه من القائمة، ثم يطلب منا تحديد رقم العضو الغائب.
-
-المطلوب هو معرفة العضو الغائب بشكل صحيح في **16 جولة متتالية** حتى يقوم السيرفر بإظهار الفلاق.
+- **Challenge Name:** Roll Call
+- **Category:** Crypto
+- **Platform:** Flagyard CTF
+- **Service:** `tcp.flagyard.com:15537`
 
 ---
 
-# تحليل البروتوكول
+# Challenge Description
 
-بعد الاتصال بالخدمة، يوفر السيرفر أمر:
+<img width="906" height="198" alt="لقطة الشاشة 2026-08-26 214213" src="https://github.com/user-attachments/assets/5c6d8b68-476b-403a-8529-359f31a0eeaa" />
 
 
+The challenge simulates a roll call system containing 256 members.
+
+In each round, the server randomly removes one member from the roster and asks us to identify the missing member.
+
+The goal is to correctly identify the absent member for **16 consecutive rounds** in order to obtain the flag.
+
+---
+
+# Protocol Analysis
+
+After connecting to the service, the server provides the following command:
+
+```
 handle <c>
+```
 
+The value `c` is controlled by the client.
 
-حيث يمكن للمستخدم التحكم بالقيمة `c`.
+The server returns:
 
-بعد إرسال الطلب، يعيد السيرفر:
+- A list of encrypted identifiers for all present members.
+- An encrypted value corresponding to the chosen input.
 
-- قائمة القيم المشفرة للأعضاء الموجودين.
-- قيمة مشفرة مرتبطة بالقيمة التي تم إرسالها.
+After that, we submit our answer using:
 
-بعد ذلك يمكن إرسال:
-
-
+```
 submit <member>
-
-
-لتقديم الإجابة النهائية للجولة.
+```
 
 ---
 
-# التحليل التشفيري
+# Cryptographic Analysis
 
-يقوم السيرفر بتحويل رقم العضو باستخدام الدالة:
+The server maps each member using the function:
 
-
+```
 H(m) = (SHA256("id=" + str(m)) mod p)^2 mod p
+```
 
+Then it generates a random secret value:
 
-ثم يختار قيمة سرية عشوائية:
-
-
+```
 k
+```
 
+and applies it to the roster values:
 
-ويستخدمها لتشفير جميع القيم.
-
-يتم حساب قائمة الأعضاء:
-
-
+```
 eids = [H(m)^k mod p for m in roster]
+```
 
+It also computes:
 
-كما يتم حساب قيمة الإدخال الذي يرسله المستخدم:
-
-
+```
 deid = c^k mod p
+```
 
+where `c` is controlled by the attacker.
 
 ---
 
-# اكتشاف الثغرة
+# Vulnerability Discovery
 
-المشكلة الأساسية في التصميم هي استخدام نفس القيمة السرية `k` لتشفير:
+The main weakness is that the same secret exponent `k` is applied to both:
 
-- بيانات الأعضاء الموجودة في القائمة.
-- القيمة التي يتحكم بها المستخدم.
+- The encrypted roster values.
+- The attacker-controlled input.
 
-بما أن المستخدم يستطيع اختيار `c`، يمكنه بناء قيم متوقعة ومقارنتها مع القيم التي يعيدها السيرفر.
+Since the attacker can choose `c`, it is possible to construct predictable values and compare them with the server responses.
 
-أيضًا، قائمة الأعضاء تكون مرتبة ويتم حذف عضو واحد فقط منها، لذلك يمكن اختبار جميع الاحتمالات ومعرفة العضو الذي يؤدي إلى تطابق النتيجة.
+Additionally, the roster is sorted and contains exactly one missing member, creating a single gap that can be detected.
 
-عند التخمين الصحيح:
+For the correct absent member:
 
-
+```
 predicted_value == deid
+```
 
-
-أما باقي الاحتمالات فلن تعطي تطابقًا.
+while incorrect guesses produce unrelated values.
 
 ---
 
-# استخراج قيمة p
+# Recovering the Prime Value p
 
-لم تكن قيمة `p` معطاة بشكل مباشر، لذلك تم استخراجها باستخدام استعلامات متحكم بها.
+The value of `p` was not provided directly.
 
-تم اختيار مجموعة من القيم وإنشاء قيمة:
+It was recovered using controlled queries.
 
+A selected set of members was used:
 
+```
+S = {40,80,120,160,200}
+```
+
+A controlled value was generated:
+
+```
 c = ∏ H(m)
+```
 
+For each possible absent member `a`, the expected result was calculated.
 
-ثم تم حساب النتائج المتوقعة لكل احتمال للعضو الغائب.
+For the correct candidate:
 
-عند العضو الصحيح:
-
-
+```
 pred(a) - deid ≡ 0 (mod p)
+```
 
+Using:
 
-وباستخدام عمليات مثل:
-
-
+```
 gcd()
+```
 
+on the obtained differences allowed recovery of:
 
-تم استخراج قيمة:
-
-
+```
 p =
 113922386694983050382912391517437431439572639334235676622418446302583918640667
-
+```
 
 ---
 
-# استراتيجية الحل
+# Solving Strategy
 
-كل جولة تسمح بعدد محدود من العمليات:
+Each round allows only three operations:
 
-
+```
 handle
 handle
 submit
+```
 
+Therefore, brute forcing all 256 members is not possible.
 
-لذلك لا يمكن تجربة جميع الأعضاء بشكل مباشر.
-
-تم تقسيم الحل إلى استعلامين.
+The solution uses two queries.
 
 ---
 
-## الاستعلام الأول
+## Query 1
 
-تم استخدام مجموعة القيم الفردية:
+The first query uses odd member values:
 
-
+```
 {1,3,5,...,255}
+```
 
+The calculated predictions are compared against `deid`.
 
-ثم يتم بناء قيمة متوقعة لكل عضو محتمل.
-
-إذا حدث تطابق مع نتيجة السيرفر، يتم تحديد العضو الغائب.
+If a match is found, the absent member is identified.
 
 ---
 
-## الاستعلام الثاني
+## Query 2
 
-في حال عدم العثور على النتيجة من الاستعلام الأول، يتم استخدام مجموعة القيم الزوجية:
+If the first query does not reveal the answer, the second query uses:
 
-
+```
 {0,2,4,...,254}
+```
 
+This covers the remaining cases.
 
-وهذا يغطي الاحتمالات المتبقية.
+After identifying the missing member:
 
-بعد تحديد العضو الغائب يتم إرسال:
-
-
+```
 submit <answer>
+```
 
+is sent to complete the round.
 
-وتبدأ الجولة التالية.
+The process is repeated for all 16 rounds.
 
 ---
 
-# تحسين الأداء
+# Performance Optimization
 
-لزيادة سرعة الحل تم استخدام:
+To improve performance, prefix and suffix products were used.
 
-- Prefix Products
-- Suffix Products
+Instead of recalculating products for every possible candidate:
 
-بدل إعادة حساب حاصل الضرب لكل احتمال.
-
-هذا أدى إلى تقليل تعقيد الحساب من:
-
-
+```
 O(n)
+```
 
+the calculation was optimized to:
 
-إلى:
-
-
+```
 O(1)
+```
 
+for each candidate.
 
-لكل احتمال.
+This allows every round to complete almost instantly.
 
 ---
 
-# السكربت المستخدم
+# Solver Implementation
 
-تم تنفيذ الحل باستخدام Python بالاعتماد على المكتبات القياسية فقط:
+The final solver was written in Python using only standard libraries:
 
-
+```
 socket
 hashlib
 ast
 re
 sys
 time
+```
 
+The solver performs:
 
-وظائف السكربت الرئيسية:
-
-- الاتصال بالخدمة.
-- إرسال استعلامات `handle`.
-- تحليل النتائج.
-- تحديد العضو الغائب.
-- إرسال الإجابة.
-- تكرار العملية 16 مرة.
+- Connection handling.
+- Sending `handle` queries.
+- Identifying the missing member.
+- Submitting the correct answer.
+- Repeating the process for 16 rounds.
 
 ---
 
-# نتيجة التنفيذ
+# Execution Result
 
-بعد تشغيل السكربت:
+Running:
 
 ```bash
 python3 solve.py
+```
 
-تم حل جميع الجولات بنجاح والحصول على الفلاق:
+Successfully completes all rounds.
 
+<img width="1165" height="240" alt="لقطة الشاشة 2026-08-26 214259" src="https://github.com/user-attachments/assets/05a6034d-9bce-4e0e-afc3-0333aba59eff" />
+
+
+Flag:
+
+```
 FlagY{0894dcefbb95e38469********}
-(تم إخفاء جزء من الفلاق.)
+```
 
-الخلاصة
+(The remaining part of the flag is hidden.)
 
-يعتمد التحدي على ضعف في تصميم بروتوكول التشفير، حيث يسمح للمستخدم بالتحكم بالقيمة الداخلة في العملية الحسابية التي تستخدم نفس المفتاح السري مع بيانات السيرفر.
+---
 
-باستغلال ترتيب القائمة والخصائص الرياضية للعملية التشفيرية، تمكنا من تحديد العضو الغائب في كل جولة وإكمال 16 جولة متتالية بنجاح.
+# Conclusion
+
+The challenge relies on a cryptographic design weakness where the attacker can control the input to the same transformation that protects the server's data.
+
+By exploiting the ordered roster and the mathematical properties of the construction, we were able to determine the missing member with a limited number of queries and complete all 16 rounds successfully.
