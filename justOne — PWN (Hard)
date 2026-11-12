@@ -1,0 +1,103 @@
+# justOne — CTF Write-up 🚩
+
+**Platform:** FlagYard  
+**Challenge:** justOne  
+**Category:** PWN / Binary Exploitation  
+**Difficulty:** Hard 🔴  
+**Status:** Solved ✅
+
+## 1. Challenge Description
+
+> Can you pwn this challenge with just a single `printf`? There's only one call — make it count.
+
+**Connection:** `tcp.flagyard.com:13591`
+
+التحدي يعتمد على استغلال ثغرة Format String، مع قيد مهم: يوجد استدعاء واحد فقط للدالة `printf` القابلة للاستغلال في كل تشغيل.
+
+الهدف هو الوصول إلى دالة `win` المسؤولة عن قراءة الفلاق.
+
+## 2. Initial Analysis
+
+بدأت بتحليل البرنامج التنفيذي `chall`، وهو ملف ELF بمعمارية x86-64.
+
+الحمايات الموجودة:
+
+| Protection | Status |
+|---|---|
+| Stack Canary | Enabled |
+| NX | Enabled |
+| PIE | Disabled |
+| RELRO | Partial |
+
+وجدت أن البرنامج يقرأ إدخال المستخدم باستخدام `fgets`، ثم يمرره مباشرة إلى `printf`.
+
+وهذا يؤدي إلى ثغرة **Format String Vulnerability**.
+
+## 3. Vulnerability Discovery
+
+المشكلة الأساسية هي استخدام:
+
+```c
+printf(user_input);
+```
+
+بدلًا من:
+
+```c
+printf("%s", user_input);
+```
+
+هذا يسمح للمستخدم بالتحكم في محددات التنسيق، واستغلال `%n` ومشتقاته لكتابة قيم في الذاكرة.
+
+ومع عدم تفعيل PIE، أصبحت عناوين الدوال داخل البرنامج ثابتة، بينما سمحت حماية Partial RELRO بإمكانية تعديل بعض إدخالات GOT.
+
+## 4. Exploitation Methodology
+
+اعتمد الاستغلال على ثلاث مراحل أساسية.
+
+### Stage 1 — GOT Overwrite
+
+استهدفت مدخل الدالة `__stack_chk_fail` داخل جدول GOT، واستخدمت Format String لتعديل جزء من عنوانها ليشير إلى دالة `win`.
+
+### Stage 2 — Stack Manipulation
+
+استفدت من مؤشرات موجودة داخل الـStack لإعادة توجيه عمليات الكتابة نحو القيمة المحفوظة للـStack Canary.
+
+تم ذلك أثناء استدعاء `printf` نفسه.
+
+### Stage 3 — Triggering Stack Canary
+
+بعد تعديل مسار `__stack_chk_fail`، قمت بإفساد جزء من قيمة Stack Canary.
+
+عندما أنهى البرنامج تنفيذ الدالة `main`، فشل فحص الـCanary، وانتقل التنفيذ عبر مدخل GOT المعدّل إلى دالة `win`.
+
+## 5. Challenges and Debugging
+
+في البداية، لم تنجح طريقة الاستغلال محليًا بالطريقة نفسها على السيرفر البعيد.
+
+أظهرت الفحوصات أن بعض مؤشرات الـStack كانت مختلفة عن المتوقع.
+
+اعتمدت المحاولة الأولى على افتراضات غير دقيقة، وانتهت 16,000 محاولة دون استخراج الفلاق.
+
+بعد ذلك، استخدمت تسريبات Format String لفحص مواقع المؤشرات الفعلية، ثم عدّلت الاستغلال لاستخدام مؤشرات مناسبة.
+
+وبسبب حماية ASLR، تطلب التنفيذ التعامل مع اختلاف عناوين الـStack بين الاتصالات.
+
+## 6. Result
+
+✅ **Challenge Solved Successfully**
+
+نجحت طريقة الاستغلال المعدّلة في استخراج الفلاق الحقيقي من السيرفر.
+
+
+## 7. What I Learned
+
+- استغلال Format String للحصول على قدرات الكتابة في الذاكرة.
+- تأثير PIE وPartial RELRO على استغلال GOT.
+- إمكانية تجاوز Stack Canary عن طريق إعادة توجيه معالج فشل الحماية.
+- استغلال مؤشرات الـStack لبناء هجوم ضمن استدعاء `printf` واحد.
+- أهمية مقارنة بيئة الاختبار المحلي بالسيرفر البعيد عند التعامل مع ASLR.
+
+---
+
+**FlagYard | PWN | Hard | Solved ✅**
